@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PokeTown</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="/public/images/pokeball.ico" type="image/x-icon">
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="game-chat" style="display: none;">
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="chat-container">
+      <div id="chat">
+        <ul id="chatMessages"></ul>
+        <div id="messageForm">
+          <input type="text" id="messageInput" placeholder="Enviar mensagem...">
+          <button id="sendMessage">Enviar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="background"></div>
+  <div id="roomForm">
+    <img src="images/pokeball.png" alt="ícone de uma pokébola">
+    <h1>POKETOWN</h1>
+    <div class="pokedex">
+      <label for="roomName">Criar ou entrar em uma sala</label>
+      <input type="text" id="roomName" placeholder="Código da sala">
+      <button id="joinRoom">Entrar</button>
+    </div>
+  </div>
+  <div id="usernameForm" style="display: none;">
+    <div class="trainers">
+      <img src="images/ash.png" alt="">
+      <img src="images/may-e.png" alt="">
+    </div>
+    <div class="pokedex">
+      <label for="username">Digite seu nickname:</label>
+      <input type="text" id="username" placeholder="Ash">
+      <button id="setName">Escolher</button>
+    </div>
+  </div>
+  <div class="pokedex">
+    <label for="pokemonName">Digite o nome do Pokémon:</label>
+    <input type="text" id="pokemonName" placeholder="Nome do Pokémon">
+    <button id="setPokemon">Definir Pokémon</button>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const socket = io();
+
+    const mapImage = new Image();
+    mapImage.src = 'images/map.png';
+
+    let userImage = new Image();
+
+    fetch('https://pokeapi.co/api/v2/pokemon/mankey')
+      .then(response => response.json())
+      .then(data => {
+        userImage.src = data.sprites.front_default;
+      })
+      .catch(error => {
+        console.error('Erro ao buscar a imagem do Mankey:', error);
+        userImage.src = 'images/pokemons/mankey.png';
+      });
+
+    let users = {};
+
+    function drawMap() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(mapImage, 0, 0, canvas.width, canvas.height);
+    }
+
+    function drawUser(user) {
+      const image = new Image();
+      image.src = user.imageUrl || userImage.src;
+      ctx.drawImage(image, user.x - image.width / 2, user.y - image.height / 2, 100, 100);
+      ctx.fillStyle = 'black';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(user.name, user.x, user.y + 50);
+      if (user.message) {
+        ctx.font = 'bold 16px Arial'; 
+        ctx.fillStyle = 'red'; 
+        ctx.fillText(user.message, user.x, user.y - 40);
+      }
+    }
+
+    function drawAllUsers() {
+      for (let id in users) {
+        drawUser(users[id]);
+      }
+    }
+
+    socket.on('update', (data) => {
+      users = data.users;
+      drawMap();
+      drawAllUsers();
+    });
+
+    document.getElementById('setName').addEventListener('click', () => {
+      const nameInput = document.getElementById('username').value;
+      if (nameInput) {
+        socket.emit('setName', { name: nameInput });
+        document.getElementById('usernameForm').style.display = 'none';
+        document.getElementById('game-chat').style.display = 'block';
+      }
+    });
+
+    document.getElementById('sendMessage').addEventListener('click', sendMessage);
+
+    document.getElementById('messageInput').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        sendMessage();
+      }
+    });
+
+    function sendMessage() {
+      const messageInput = document.getElementById('messageInput').value;
+      if (messageInput) {
+        socket.emit('sendMessage', { message: messageInput });
+        document.getElementById('messageInput').value = '';
+      }
+    }
+
+    function updatePosition(dx, dy) {
+      socket.emit('move', { dx, dy });
+    }
+
+    document.addEventListener('keydown', (event) => {
+      if (document.activeElement === document.getElementById('messageInput')) {
+        return;
+      }
+
+      console.log(users);
+
+      const step = 10; 
+
+      switch(event.key) {
+        case 'w':
+          updatePosition(0, -step);
+          break;
+        case 's':
+          updatePosition(0, step);
+          break;
+        case 'a':
+          updatePosition(-step, 0);
+          break;
+        case 'd':
+          updatePosition(step, 0);
+          break;
+      }
+    });
+
+    socket.on('receiveMessage', (data) => {
+      if (users[data.id]) {
+        users[data.id].message = data.message;
+        drawMap();
+        drawAllUsers();
+        setTimeout(() => {
+          users[data.id].message = '';
+          drawMap();
+          drawAllUsers();
+        }, 5000);
+      }
+
+      const chatMessages = document.getElementById('chatMessages');
+      const newMessage = document.createElement('li');
+      newMessage.textContent = `${users[data.id].name}: ${data.message}`;
+      chatMessages.appendChild(newMessage);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    });
+
+    document.getElementById('joinRoom').addEventListener('click', () => {
+      const roomName = document.getElementById('roomName').value;
+      if (roomName) {
+        socket.emit('joinRoom', roomName);
+        document.getElementById('roomForm').style.display = 'none';
+        document.getElementById('usernameForm').style.display = 'flex';
+      }
+    });
+
+    document.getElementById('setName').addEventListener('click', () => {
+      const nameInput = document.getElementById('username').value;
+      if (nameInput) {
+        socket.emit('setName', { name: nameInput });
+        document.getElementById('usernameForm').style.display = 'none';
+        document.getElementById('game-chat').style.display = 'flex';
+        document.getElementById('background').style.display = 'none';
+      }
+    });
+
+    document.getElementById('setPokemon').addEventListener('click', () => {
+      const pokemonName = document.getElementById('pokemonName').value.toLowerCase();
+      if (pokemonName) {
+        fetch(`https://pokeapi.co/api/v2/pokemon/${pokemonName}`)
+          .then(response => {
+            if (!response.ok) throw new Error('Pokémon não encontrado');
+            return response.json();
+          })
+          .then(data => {
+            const imageUrl = data.sprites.front_default;
+            if (imageUrl) {
+              userImage.src = imageUrl;
+              // Enviar a URL da nova imagem para o servidor
+              socket.emit('updatePokemonImage', { imageUrl });
+            } else {
+              console.error('Imagem não encontrada');
+            }
+          })
+          .catch(error => {
+            console.error('Erro:', error);
+            alert('Pokémon não encontrado');
+          });
+      }
+    });
+
+    socket.on('updatePokemonImage', (data) => {
+      for (let id in users) {
+        users[id].imageUrl = data.imageUrl;
+      }
+      drawMap();
+      drawAllUsers();
+    });
+  </script>
+</body>
+</html>
